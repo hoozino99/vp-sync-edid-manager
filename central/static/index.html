@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VP Stage Sync & EDID Manager</title>
+<style>
+  :root {
+    --bg: #1a1a2e; --surface: #16213e; --card: #0f3460;
+    --accent: #e94560; --ok: #4ecca3; --warn: #f0a500; --err: #e94560;
+    --text: #eee; --muted: #888; --border: #2a2a4a;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; background: var(--bg); color: var(--text); padding: 16px; }
+  h1 { text-align: center; margin-bottom: 8px; font-size: 1.4em; }
+  .toolbar { display: flex; justify-content: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
+  .toolbar button { padding: 8px 20px; border: none; border-radius: 6px; cursor: pointer; font-weight: 600; font-size: 0.9em; }
+  .btn-refresh { background: var(--ok); color: #111; }
+  .btn-fixall { background: var(--accent); color: #fff; }
+  .btn-refresh:hover { filter: brightness(1.15); }
+  .btn-fixall:hover { filter: brightness(1.15); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+  .card { background: var(--card); border-radius: 10px; padding: 14px; border: 1px solid var(--border); }
+  .card.master { border-color: var(--accent); background: linear-gradient(135deg, #0f3460 60%, #1a1040); box-shadow: 0 0 12px rgba(233,69,96,0.15); }
+  .badge-master { background: var(--accent); color: #fff; }
+  .badge-slave { background: #444; color: #ccc; }
+  .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+  .card-header h3 { font-size: 1em; }
+  .card-header .ip { font-size: 0.8em; color: var(--muted); }
+  .gpu-name { font-size: 0.8em; color: var(--warn); margin-bottom: 8px; }
+  .section { margin-bottom: 10px; }
+  .section-title { font-size: 0.75em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; letter-spacing: 0.5px; }
+  .row { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap; }
+  .badge { padding: 2px 8px; border-radius: 4px; font-size: 0.75em; font-weight: 600; }
+  .badge-ok { background: var(--ok); color: #111; }
+  .badge-err { background: var(--err); color: #fff; }
+  .badge-warn { background: var(--warn); color: #111; }
+  .badge-muted { background: #444; color: #ccc; }
+  select { background: #1a1a3e; color: var(--text); border: 1px solid var(--border); border-radius: 4px; padding: 3px 6px; font-size: 0.8em; }
+  .btn-sm { padding: 3px 10px; border: none; border-radius: 4px; cursor: pointer; font-size: 0.75em; font-weight: 600; }
+  .btn-blue { background: #3a86ff; color: #fff; }
+  .btn-red { background: var(--accent); color: #fff; }
+  .btn-green { background: var(--ok); color: #111; }
+  .btn-orange { background: var(--warn); color: #111; }
+  .btn-sm:hover { filter: brightness(1.2); }
+  .btn-sm:disabled { opacity: 0.4; cursor: not-allowed; }
+  .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+  .dot-ok { background: var(--ok); }
+  .dot-err { background: var(--err); }
+  .dot-warn { background: var(--warn); }
+  .dot-off { background: #555; }
+  .error-msg { color: var(--err); font-size: 0.8em; padding: 6px; background: rgba(233,69,96,0.1); border-radius: 4px; }
+  .spinner { display: none; width: 14px; height: 14px; border: 2px solid #555; border-top-color: var(--ok); border-radius: 50%; animation: spin 0.6s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .card.loading .spinner { display: inline-block; }
+</style>
+</head>
+<body>
+
+<h1>🖥️ VP Stage Sync & EDID Manager</h1>
+
+<div class="toolbar">
+  <button class="btn-refresh" onclick="refreshAll()">🔄 Refresh All</button>
+  <button class="btn-fixall" onclick="fixAllBroken()">🔧 Fix All Broken</button>
+  <span id="conn-status" style="font-size:0.8em; color:var(--muted); align-self:center;">Connecting…</span>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<script>
+const API = '';
+let nodes = {};
+let ws;
+
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen = () => { document.getElementById('conn-status').textContent = '🟢 Connected'; };
+  ws.onclose = () => {
+    document.getElementById('conn-status').textContent = '🔴 Disconnected';
+    setTimeout(connectWS, 3000);
+  };
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'status') {
+      msg.nodes.forEach(n => { nodes[n.id] = n; });
+      renderAll();
+    }
+  };
+}
+
+function renderAll() {
+  const grid = document.getElementById('grid');
+  const sorted = Object.values(nodes).sort((a, b) => a.id - b.id);
+  grid.innerHTML = sorted.map(n => renderCard(n)).join('');
+}
+
+function renderCard(n) {
+  if (n.error) {
+    return `<div class="card">
+      <div class="card-header"><h3>${esc(n.name)}</h3><span class="ip">${esc(n.ip)}</span></div>
+      <div class="error-msg">⚠️ ${esc(n.error)}</div>
+      <div style="margin-top:8px"><button class="btn-sm btn-orange" onclick="quickFix(${n.id},0)">Quick Fix</button></div>
+    </div>`;
+  }
+
+  const gpu = n.gpu_name || 'Unknown GPU';
+  const outputs = n.outputs || [];
+  const sync = n.sync || {};
+
+  let edidHtml = '';
+  if (outputs.length > 0) {
+    const opts = outputs.map(o =>
+      `<option value="${o.id}">[${o.id}] ${esc(o.name || 'Output')} ${o.edid_loaded ? '✅' : '❌'}</option>`
+    ).join('');
+    edidHtml = `
+      <div class="section">
+        <div class="section-title">EDID</div>
+        <div class="row">
+          <select id="edid-sel-${n.id}">${opts}</select>
+          <span class="badge ${outputs.some(o=>!o.edid_loaded) ? 'badge-err' : 'badge-ok'}">
+            ${outputs.filter(o=>o.edid_loaded).length}/${outputs.length} loaded
+          </span>
+        </div>
+        <div class="row" style="margin-top:4px">
+          <button class="btn-sm btn-blue" onclick="edidLoad(${n.id})">Load</button>
+          <button class="btn-sm btn-red" onclick="edidUnload(${n.id})">Unload</button>
+        </div>
+      </div>`;
+  }
+
+  const isMaster = sync.role === 'MASTER';
+  const syncLock = sync.locked;
+  const refreshHz = sync.refresh_rate ? (sync.refresh_rate / 1000).toFixed(1) + ' Hz' : '';
+  const houseHz = sync.house_incoming_rate ? (sync.house_incoming_rate / 1000).toFixed(1) + ' Hz' : '';
+
+  const syncHtml = `
+    <div class="section">
+      <div class="section-title">Sync</div>
+      <div class="row">
+        <span class="badge ${isMaster ? 'badge-master' : 'badge-slave'}">${isMaster ? 'MASTER (BNC → FL)' : 'SLAVE'}</span>
+        <span class="badge ${syncLock ? 'badge-ok' : 'badge-err'}">${syncLock ? '🔒 Locked' : '🔓 Unlocked'}${refreshHz ? ' @ ' + refreshHz : ''}</span>
+      </div>
+      ${isMaster ? `<div class="row" style="margin-top:4px">
+        <span class="badge ${sync.house_sync ? 'badge-ok' : 'badge-warn'}">House Sync: ${sync.house_sync ? 'ON' : 'OFF'}${houseHz ? ' (' + houseHz + ')' : ''}</span>
+        <span class="badge badge-muted">Source: ${esc(sync.source || '—')}</span>
+      </div>` : ''}
+      <div class="row" style="margin-top:4px">
+        <button class="btn-sm btn-green" onclick="syncEnable(${n.id})">Enable</button>
+        <button class="btn-sm btn-red" onclick="syncDisable(${n.id})">Disable</button>
+      </div>
+    </div>`;
+
+  const allEdidOk = outputs.length > 0 && outputs.every(o => o.edid_loaded);
+  const disconnected = n.disconnected_count || 0;
+  const dotClass = n.error ? 'dot-err' : (syncLock && allEdidOk ? 'dot-ok' : 'dot-warn');
+
+  return `<div class="card ${isMaster ? 'master' : ''}" id="card-${n.id}">
+    <div class="card-header">
+      <h3><span class="status-dot ${dotClass}"></span> ${esc(n.name)}</h3>
+      <span class="ip">${esc(n.ip)}</span>
+    </div>
+    <div class="gpu-name">🎮 ${esc(gpu)}</div>
+    ${edidHtml}
+    ${disconnected > 0 ? `<div style="font-size:0.75em; color:var(--muted); margin-bottom:6px;">💤 ${disconnected} port${disconnected > 1 ? 's' : ''} disconnected</div>` : ''}
+    ${syncHtml}
+    <div style="margin-top:6px; text-align:right;">
+      <button class="btn-sm btn-orange" onclick="quickFix(${n.id},0)">⚡ Quick Fix</button>
+    </div>
+  </div>`;
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+async function apiPost(url) {
+  try {
+    const r = await fetch(url, { method: 'POST' });
+    return await r.json();
+  } catch(e) { return { error: e.message }; }
+}
+
+function getSelectedOutput(nodeId) {
+  const sel = document.getElementById(`edid-sel-${nodeId}`);
+  return sel ? sel.value : 0;
+}
+
+async function quickFix(id, outputId) { await apiPost(`${API}/api/nodes/${id}/fix?output_id=${outputId}`); }
+async function edidLoad(id) { await apiPost(`${API}/api/nodes/${id}/edid/load?output_id=${getSelectedOutput(id)}`); }
+async function edidUnload(id) { await apiPost(`${API}/api/nodes/${id}/edid/unload?output_id=${getSelectedOutput(id)}`); }
+async function syncEnable(id) { await apiPost(`${API}/api/nodes/${id}/sync/enable`); }
+async function syncDisable(id) { await apiPost(`${API}/api/nodes/${id}/sync/disable`); }
+
+async function refreshAll() {
+  const r = await fetch(`${API}/api/nodes`);
+  const data = await r.json();
+  data.forEach(n => { nodes[n.id] = n; });
+  renderAll();
+}
+
+async function fixAllBroken() {
+  document.querySelector('.btn-fixall').disabled = true;
+  document.querySelector('.btn-fixall').textContent = '⏳ Fixing…';
+  try {
+    await apiPost(`${API}/api/fix-all-broken`);
+  } finally {
+    document.querySelector('.btn-fixall').disabled = false;
+    document.querySelector('.btn-fixall').textContent = '🔧 Fix All Broken';
+  }
+}
+
+connectWS();
+</script>
+</body>
+</html>
