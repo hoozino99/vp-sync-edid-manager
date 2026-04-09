@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VP Stage Dashboard</title>
+<style>
+  :root {
+    --bg: #0b1120; --surface: #111827; --card: #1e293b;
+    --ok: #10b981; --err: #ef4444; --warn: #f59e0b; --gold: #d4a017;
+    --text: #f1f5f9; --muted: #94a3b8; --border: #334155;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  /* ── Summary Bar ── */
+  .summary-bar {
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 14px 24px; display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+  }
+  .summary-bar .title { font-size: 1.2em; font-weight: 700; letter-spacing: -0.3px; }
+  .summary-bar .sep { width: 1px; height: 20px; background: var(--border); }
+  .summary-bar .stat { font-size: 0.85em; color: var(--muted); }
+  .summary-bar .stat b { color: var(--text); }
+  .summary-bar .overall { margin-left: auto; font-size: 0.85em; font-weight: 600; padding: 4px 12px; border-radius: 20px; }
+  .overall-ok { background: rgba(16,185,129,0.15); color: var(--ok); }
+  .overall-warn { background: rgba(245,158,11,0.15); color: var(--warn); }
+  .overall-err { background: rgba(239,68,68,0.15); color: var(--err); }
+
+  /* ── Grid ── */
+  .grid {
+    display: grid; gap: 14px; padding: 20px 24px;
+    grid-template-columns: repeat(4, 1fr);
+  }
+  @media (max-width: 1400px) { .grid { grid-template-columns: repeat(3, 1fr); } }
+  @media (max-width: 960px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 580px) { .grid { grid-template-columns: 1fr; } }
+
+  /* ── Card ── */
+  .card {
+    background: var(--card); border-radius: 12px; padding: 16px;
+    border: 1px solid var(--border); transition: box-shadow 0.2s;
+  }
+  .card:hover { box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+  .card.master { border-color: var(--gold); box-shadow: 0 0 16px rgba(212,160,23,0.12); }
+
+  /* Card Header */
+  .card-hdr { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .card-hdr-left { display: flex; align-items: center; gap: 8px; }
+  .status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .dot-ok { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+  .dot-warn { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
+  .dot-err { background: var(--err); box-shadow: 0 0 6px var(--err); }
+  .node-name { font-weight: 700; font-size: 0.95em; }
+  .node-ip { font-size: 0.75em; color: var(--muted); }
+  .gpu-label { font-size: 0.7em; color: var(--muted); text-align: right; max-width: 140px; line-height: 1.2; }
+
+  /* Sync Section */
+  .sync-box {
+    border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; text-align: center;
+  }
+  .sync-locked { background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.25); }
+  .sync-unlocked { background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.25); }
+  .sync-main { font-size: 1.05em; font-weight: 700; }
+  .sync-locked .sync-main { color: var(--ok); }
+  .sync-unlocked .sync-main { color: var(--err); }
+  .sync-detail { font-size: 0.75em; color: var(--muted); margin-top: 4px; }
+  .master-badge {
+    display: inline-block; font-size: 0.65em; font-weight: 700; padding: 2px 8px;
+    border-radius: 10px; background: var(--gold); color: #111; margin-bottom: 6px;
+  }
+
+  /* EDID Section */
+  .edid-row { display: flex; align-items: center; gap: 6px; font-size: 0.8em; }
+  .edid-ok { color: var(--ok); }
+  .edid-err { color: var(--err); }
+  .unused-label { font-size: 0.72em; color: var(--muted); margin-top: 2px; }
+
+  /* Error */
+  .error-card-body { padding: 8px; background: rgba(239,68,68,0.08); border-radius: 6px; font-size: 0.82em; color: var(--err); }
+
+  /* Footer */
+  .footer {
+    padding: 12px 24px; text-align: center; font-size: 0.75em; color: var(--muted);
+    border-top: 1px solid var(--border);
+  }
+</style>
+</head>
+<body>
+
+<div class="summary-bar" id="summary">
+  <span class="title">VP Stage Dashboard</span>
+  <span class="sep"></span>
+  <span class="stat" id="s-online">—</span>
+  <span class="sep"></span>
+  <span class="stat" id="s-sync">—</span>
+  <span class="sep"></span>
+  <span class="stat" id="s-master">—</span>
+  <span id="s-overall" class="overall overall-ok">—</span>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<div class="footer">
+  <span id="conn-status">⏳ Connecting…</span> &nbsp;·&nbsp; Last update: <span id="last-update">—</span>
+</div>
+
+<script>
+let nodes = {};
+let ws;
+
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen = () => { document.getElementById('conn-status').textContent = '🟢 Connected'; };
+  ws.onclose = () => {
+    document.getElementById('conn-status').textContent = '🔴 Disconnected — reconnecting…';
+    setTimeout(connectWS, 3000);
+  };
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'status') {
+      msg.nodes.forEach(n => { nodes[n.id] = n; });
+      renderAll();
+      document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+    }
+  };
+}
+
+function renderAll() {
+  const sorted = Object.values(nodes).sort((a, b) => a.id - b.id);
+
+  // Summary
+  const total = sorted.length;
+  const online = sorted.filter(n => !n.error).length;
+  const locked = sorted.filter(n => n.sync && n.sync.locked).length;
+  const master = sorted.find(n => n.sync && n.sync.role === 'MASTER');
+  const masterHz = master && master.sync.refresh_rate ? (master.sync.refresh_rate / 1000).toFixed(1) : '—';
+
+  document.getElementById('s-online').innerHTML = `<b>${online}/${total}</b> Online`;
+  document.getElementById('s-sync').innerHTML = `<b>${locked}/${total}</b> Sync Locked`;
+  document.getElementById('s-master').innerHTML = `Master: <b>Node 01</b> @ ${masterHz} Hz`;
+
+  const ov = document.getElementById('s-overall');
+  if (online === total && locked === total) {
+    ov.textContent = '🟢 All Systems OK'; ov.className = 'overall overall-ok';
+  } else if (online === 0) {
+    ov.textContent = '🔴 All Offline'; ov.className = 'overall overall-err';
+  } else {
+    ov.textContent = '⚠️ Issues Detected'; ov.className = 'overall overall-warn';
+  }
+
+  // Cards
+  document.getElementById('grid').innerHTML = sorted.map(renderCard).join('');
+}
+
+function renderCard(n) {
+  if (n.error) {
+    return `<div class="card">
+      <div class="card-hdr">
+        <div class="card-hdr-left">
+          <span class="status-dot dot-err"></span>
+          <span class="node-name">${esc(n.name)}</span>
+          <span class="node-ip">${esc(n.ip)}</span>
+        </div>
+      </div>
+      <div class="error-card-body">⚠️ ${esc(n.error)}</div>
+    </div>`;
+  }
+
+  const sync = n.sync || {};
+  const outputs = n.outputs || [];
+  const unused = n.unused_ports || 0;
+  const isMaster = sync.role === 'MASTER';
+  const syncLock = sync.locked;
+  const refreshHz = sync.refresh_rate ? (sync.refresh_rate / 1000).toFixed(1) : '—';
+  const houseHz = sync.house_incoming_rate ? (sync.house_incoming_rate / 1000).toFixed(1) : '—';
+  const allEdidOk = outputs.length > 0 && outputs.every(o => o.edid_loaded);
+  const dotClass = (syncLock && allEdidOk) ? 'dot-ok' : (!syncLock ? 'dot-warn' : 'dot-warn');
+  const gpu = n.gpu_name || '';
+  // Shorten GPU name
+  const gpuShort = gpu.replace('NVIDIA ', '').replace(' Generation', '');
+
+  let syncHtml = '';
+  if (isMaster) {
+    syncHtml = `
+      <div class="sync-box ${syncLock ? 'sync-locked' : 'sync-unlocked'}">
+        <div class="master-badge">★ MASTER</div>
+        <div class="sync-main">${syncLock ? '🔒' : '🔓'} ${syncLock ? 'Locked' : 'Unlocked'} @ ${refreshHz} Hz</div>
+        <div class="sync-detail">House Sync: ${sync.house_sync ? 'ON' : 'OFF'} (${houseHz} Hz) · Source: ${esc(sync.source || '—')}</div>
+      </div>`;
+  } else {
+    syncHtml = `
+      <div class="sync-box ${syncLock ? 'sync-locked' : 'sync-unlocked'}">
+        <div class="sync-main">${syncLock ? '🔒' : '🔓'} ${syncLock ? 'Locked' : 'Unlocked'} @ ${refreshHz} Hz</div>
+      </div>`;
+  }
+
+  let edidHtml = '';
+  if (outputs.length > 0) {
+    edidHtml = outputs.map(o =>
+      `<div class="edid-row"><span class="${o.edid_loaded ? 'edid-ok' : 'edid-err'}">${esc(o.name)}: EDID ${o.edid_loaded ? 'OK ✅' : 'MISSING ❌'}</span></div>`
+    ).join('');
+  }
+  if (unused > 0) {
+    edidHtml += `<div class="unused-label">(+${unused} unused)</div>`;
+  }
+
+  return `<div class="card ${isMaster ? 'master' : ''}">
+    <div class="card-hdr">
+      <div class="card-hdr-left">
+        <span class="status-dot ${dotClass}"></span>
+        <span class="node-name">${esc(n.name)}</span>
+        <span class="node-ip">${esc(n.ip)}</span>
+      </div>
+      <span class="gpu-label">${esc(gpuShort)}</span>
+    </div>
+    ${syncHtml}
+    ${edidHtml}
+  </div>`;
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+connectWS();
+</script>
+</body>
+</html>
