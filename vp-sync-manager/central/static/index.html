@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VP Stage Dashboard</title>
+<style>
+  :root {
+    --bg: #0b1120; --surface: #111827; --card: #1e293b;
+    --ok: #10b981; --err: #ef4444; --warn: #f59e0b; --gold: #d4a017;
+    --text: #f1f5f9; --muted: #94a3b8; --border: #334155; --blue: #3b82f6;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  button, input, select { font: inherit; }
+
+  .alert-banner { display:none; background: rgba(239,68,68,0.18); border-bottom: 1px solid rgba(239,68,68,0.4); padding: 10px 24px; }
+  .alert-banner.show { display:block; }
+  .alert-banner .hdr { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; gap:12px; }
+  .alert-banner .hdr b { color: #fecaca; }
+  .alert-list { display:flex; flex-direction:column; gap:6px; max-height:180px; overflow:auto; }
+  .alert-item { background: rgba(15,23,42,0.55); border:1px solid rgba(239,68,68,0.3); padding:8px 10px; border-radius:8px; font-size:12px; }
+
+  .summary-bar {
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    padding: 14px 24px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  }
+  .summary-bar .title { font-size: 1.2em; font-weight: 700; letter-spacing: -0.3px; }
+  .summary-bar .sep { width: 1px; height: 20px; background: var(--border); }
+  .summary-bar .stat { font-size: 0.85em; color: var(--muted); }
+  .summary-bar .stat b { color: var(--text); }
+  .summary-bar .overall { margin-left: auto; font-size: 0.85em; font-weight: 600; padding: 4px 12px; border-radius: 20px; }
+  .btn-mini { border: 1px solid var(--border); background: #0f172a; color: var(--text); border-radius: 999px; padding: 6px 10px; cursor: pointer; font-size: 12px; }
+  .btn-mini:hover { border-color: #475569; }
+  .btn-mini.blue { color: #bfdbfe; border-color: rgba(59,130,246,.45); }
+  .btn-mini.blue:hover { background: rgba(59,130,246,.12); }
+  .overall-ok { background: rgba(16,185,129,0.15); color: var(--ok); }
+  .overall-warn { background: rgba(245,158,11,0.15); color: var(--warn); }
+  .overall-err { background: rgba(239,68,68,0.15); color: var(--err); }
+
+  .grid { display: grid; gap: 14px; padding: 20px 24px 260px; grid-template-columns: repeat(4, 1fr); }
+  @media (max-width: 1400px) { .grid { grid-template-columns: repeat(3, 1fr); } }
+  @media (max-width: 960px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (max-width: 580px) { .grid { grid-template-columns: 1fr; } }
+
+  .card { background: var(--card); border-radius: 12px; padding: 16px; border: 1px solid var(--border); transition: box-shadow 0.2s; }
+  .card:hover { box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+  .card.master { border-color: var(--gold); box-shadow: 0 0 16px rgba(212,160,23,0.12); }
+  .card-hdr { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+  .card-hdr-left { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .status-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .dot-ok { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+  .dot-warn { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
+  .dot-err { background: var(--err); box-shadow: 0 0 6px var(--err); }
+  .node-name { font-weight: 700; font-size: 0.95em; }
+  .node-ip { font-size: 0.75em; color: var(--muted); }
+  .gpu-label { font-size: 0.7em; color: var(--muted); text-align: right; max-width: 140px; line-height: 1.2; }
+
+  .sync-box { border-radius: 8px; padding: 10px 12px; margin-bottom: 10px; text-align: center; }
+  .sync-locked { background: rgba(16,185,129,0.12); border: 1px solid rgba(16,185,129,0.25); }
+  .sync-unlocked { background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.25); }
+  .sync-main { font-size: 1.02em; font-weight: 700; }
+  .sync-locked .sync-main { color: var(--ok); }
+  .sync-unlocked .sync-main { color: var(--err); }
+  .sync-detail { font-size: 0.75em; color: var(--muted); margin-top: 4px; }
+  .master-badge { display: inline-block; font-size: 0.65em; font-weight: 700; padding: 2px 8px; border-radius: 10px; background: var(--gold); color: #111; margin-bottom: 6px; }
+
+  .edid-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 0.8em; margin-top: 6px; }
+  .edid-ok { color: var(--ok); }
+  .edid-err { color: var(--err); }
+  .unused-label { font-size: 0.72em; color: var(--muted); margin-top: 2px; }
+  .action-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+  .field-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-top: 8px; }
+  .field-row input[type="file"], .field-row select { color: var(--muted); background: #0f172a; border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; max-width: 100%; }
+  .btn { border: 1px solid var(--border); background: #0f172a; color: var(--text); border-radius: 8px; padding: 6px 10px; cursor: pointer; font-size: 12px; }
+  .btn:hover { border-color: #475569; }
+  .btn.ok { background: rgba(16,185,129,0.12); border-color: rgba(16,185,129,0.35); color: #bbf7d0; }
+  .btn.blue { background: rgba(59,130,246,0.12); border-color: rgba(59,130,246,0.35); color: #dbeafe; }
+  .btn.red { background: rgba(239,68,68,0.12); border-color: rgba(239,68,68,0.35); color: #fecaca; }
+  .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  .toast-wrap { position: fixed; right: 18px; top: 18px; z-index: 40; display:flex; flex-direction:column; gap:10px; }
+  .toast { min-width: 240px; max-width: 360px; padding: 10px 12px; border-radius: 10px; background: rgba(15,23,42,0.96); border: 1px solid var(--border); box-shadow: 0 8px 24px rgba(0,0,0,0.35); font-size: 12px; }
+  .toast.ok { border-color: rgba(16,185,129,0.4); }
+  .toast.err { border-color: rgba(239,68,68,0.5); }
+  .toast .title { font-weight: 700; margin-bottom: 4px; }
+
+  .log-panel { position: fixed; left: 0; right: 0; bottom: 0; background: rgba(17,24,39,0.98); border-top: 1px solid var(--border); max-height: 220px; display: flex; flex-direction: column; z-index: 30; }
+  .log-panel.collapsed { max-height: 40px; }
+  .log-hdr { display:flex; align-items:center; justify-content:space-between; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+  .log-list { overflow:auto; padding: 10px 16px; display:flex; flex-direction:column; gap:6px; }
+  .log-item { font-size: 12px; color: var(--text); display:flex; gap:10px; }
+  .log-item .t { color: var(--muted); min-width: 70px; }
+  .log-item .n { min-width: 110px; color: #cbd5e1; }
+  .log-item .m { flex:1; }
+
+  .footer { padding: 12px 24px; text-align: center; font-size: 0.75em; color: var(--muted); border-top: 1px solid var(--border); }
+</style>
+</head>
+<body>
+
+<div class="alert-banner" id="alert-banner">
+  <div class="hdr">
+    <b>⚠️ Live Alerts</b>
+    <button class="btn-mini" onclick="clearAlerts()">Clear</button>
+  </div>
+  <div class="alert-list" id="alert-list"></div>
+</div>
+
+<div class="summary-bar" id="summary">
+  <span class="title">VP Stage Dashboard</span>
+  <button class="btn-mini blue" onclick="refreshNow()">🔄 Refresh</button>
+  <span class="sep"></span>
+  <span class="stat" id="s-online">—</span>
+  <span class="sep"></span>
+  <span class="stat" id="s-sync">—</span>
+  <span class="sep"></span>
+  <span class="stat" id="s-master">—</span>
+  <span id="s-overall" class="overall overall-ok">—</span>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<div class="log-panel" id="log-panel">
+  <div class="log-hdr">
+    <b>Event Log</b>
+    <button class="btn-mini" onclick="toggleLog()">Collapse</button>
+  </div>
+  <div class="log-list" id="log-list"></div>
+</div>
+
+<div class="toast-wrap" id="toast-wrap"></div>
+
+<div class="footer">
+  <span id="conn-status">⏳ Connecting…</span> &nbsp;·&nbsp; Last update: <span id="last-update">—</span>
+</div>
+
+<script>
+let nodes = {};
+let ws;
+let alerts = [];
+let logs = [];
+
+function connectWS() {
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(`${proto}://${location.host}/ws`);
+  ws.onopen = () => { document.getElementById('conn-status').textContent = '🟢 Connected'; };
+  ws.onclose = () => {
+    document.getElementById('conn-status').textContent = '🔴 Disconnected — reconnecting…';
+    setTimeout(connectWS, 3000);
+  };
+  ws.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'status') {
+      msg.nodes.forEach(n => { nodes[n.id] = n; });
+      renderAll();
+      document.getElementById('last-update').textContent = new Date().toLocaleTimeString();
+    } else if (msg.type === 'alert') {
+      alerts = [...msg.alerts, ...alerts].slice(0, 30);
+      renderAlerts();
+      msg.alerts.forEach(a => addToast(a.node, a.message, false));
+    } else if (msg.type === 'log') {
+      logs = [...msg.entries, ...logs].slice(0, 100);
+      renderLogs();
+    }
+  };
+}
+
+function refreshNow() { location.reload(); }
+function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+function clearAlerts() { alerts = []; renderAlerts(); }
+function renderAlerts() {
+  const banner = document.getElementById('alert-banner');
+  const list = document.getElementById('alert-list');
+  banner.classList.toggle('show', alerts.length > 0);
+  list.innerHTML = alerts.map(a => `<div class="alert-item"><b>${esc(a.time)}</b> · ${esc(a.node)} · ${esc(a.message)}</div>`).join('');
+}
+function renderLogs() {
+  const list = document.getElementById('log-list');
+  list.innerHTML = logs.map(l => `<div class="log-item"><span class="t">${esc(l.time)}</span><span class="n">${esc(l.node)}</span><span class="m">${esc(l.message)}</span></div>`).join('');
+  list.scrollTop = 0;
+}
+function toggleLog() {
+  document.getElementById('log-panel').classList.toggle('collapsed');
+}
+function addToast(node, message, ok=true) {
+  const wrap = document.getElementById('toast-wrap');
+  const el = document.createElement('div');
+  el.className = `toast ${ok ? 'ok' : 'err'}`;
+  el.innerHTML = `<div class="title">${esc(node || 'System')}</div><div>${esc(message)}</div>`;
+  wrap.appendChild(el);
+  setTimeout(() => el.remove(), 4500);
+}
+
+function getOutputId(n) {
+  const sel = document.getElementById(`out-${n.id}`);
+  return sel ? parseInt(sel.value || '0', 10) : 0;
+}
+
+async function postForm(url, formData) {
+  const r = await fetch(url, { method: 'POST', body: formData });
+  return await r.json();
+}
+
+async function apiPost(url) {
+  const r = await fetch(url, { method: 'POST' });
+  return await r.json();
+}
+
+async function unloadEdid(nodeId) {
+  const out = getOutputId(nodes[nodeId]);
+  const res = await apiPost(`/api/nodes/${nodeId}/edid/unload?output_id=${encodeURIComponent(out)}`);
+  addActionResult(nodes[nodeId].name, res);
+}
+
+async function enableSync(nodeId) {
+  const res = await apiPost(`/api/nodes/${nodeId}/sync/enable`);
+  addActionResult(nodes[nodeId].name, res);
+}
+
+async function disableSync(nodeId) {
+  const res = await apiPost(`/api/nodes/${nodeId}/sync/disable`);
+  addActionResult(nodes[nodeId].name, res);
+}
+
+function onEdidSelected(nodeId) {
+  const fileInput = document.getElementById(`file-${nodeId}`);
+  const fname = document.getElementById(`fname-${nodeId}`);
+  const loadBtn = document.getElementById(`loadbtn-${nodeId}`);
+  if (fileInput.files.length > 0) {
+    fname.textContent = fileInput.files[0].name;
+    loadBtn.disabled = false;
+    loadBtn.style.opacity = '1';
+  }
+}
+
+async function loadEdid(nodeId) {
+  const file = document.getElementById(`file-${nodeId}`).files[0];
+  const out = getOutputId(nodes[nodeId]);
+  const fd = new FormData();
+  fd.append('output_id', out);
+  if (file) fd.append('edid_file', file);
+  const res = await postForm(`/api/nodes/${nodeId}/edid/load`, fd);
+  addActionResult(nodes[nodeId].name, res);
+}
+
+function addActionResult(nodeName, res) {
+  const ok = (res && !res.error && (res.verified_sync_status || res.verified_edid_status));
+  const msg = ok
+    ? `Verified: EDID ${res.verified_edid_status || '—'}, Sync ${res.verified_sync_status || '—'}`
+    : (res && res.error) ? res.error : 'Action complete';
+  addToast(nodeName, msg, ok);
+}
+
+function renderAll() {
+  const sorted = Object.values(nodes).sort((a, b) => a.id - b.id);
+  const total = sorted.length;
+  const online = sorted.filter(n => !n.error).length;
+  const locked = sorted.filter(n => n.sync && n.sync.locked).length;
+  const master = sorted.find(n => n.sync && n.sync.role === 'MASTER');
+  const masterHz = master && master.sync.refresh_rate ? (master.sync.refresh_rate / 1000).toFixed(1) : '—';
+
+  document.getElementById('s-online').innerHTML = `<b>${online}/${total}</b> Online`;
+  document.getElementById('s-sync').innerHTML = `<b>${locked}/${total}</b> Sync Locked`;
+  document.getElementById('s-master').innerHTML = `Master: <b>Node 01</b> @ ${masterHz} Hz`;
+
+  const ov = document.getElementById('s-overall');
+  if (online === total && locked === total) {
+    ov.textContent = '🟢 All Systems OK'; ov.className = 'overall overall-ok';
+  } else if (online === 0) {
+    ov.textContent = '🔴 All Offline'; ov.className = 'overall overall-err';
+  } else {
+    ov.textContent = '⚠️ Issues Detected'; ov.className = 'overall overall-warn';
+  }
+
+  document.getElementById('grid').innerHTML = sorted.map(renderCard).join('');
+}
+
+function renderCard(n) {
+  if (n.error) {
+    return `<div class="card"><div class="card-hdr"><div class="card-hdr-left"><span class="status-dot dot-err"></span><span class="node-name">${esc(n.name)}</span><span class="node-ip">${esc(n.ip)}</span></div></div><div class="error-card-body">⚠️ ${esc(n.error)}</div></div>`;
+  }
+
+  const sync = n.sync || {};
+  const outputs = n.outputs || [];
+  const unused = n.unused_ports || 0;
+  const isMaster = sync.role === 'MASTER';
+  const syncLock = sync.locked;
+  const refreshHz = sync.refresh_rate ? (sync.refresh_rate / 1000).toFixed(1) : '—';
+  const houseHz = sync.house_incoming_rate ? (sync.house_incoming_rate / 1000).toFixed(1) : '—';
+  const allEdidOk = outputs.length > 0 && outputs.every(o => o.edid_loaded);
+  const dotClass = (syncLock && allEdidOk) ? 'dot-ok' : 'dot-warn';
+  const gpuShort = (n.gpu_name || '').replace('NVIDIA ', '').replace(' Generation', '');
+
+  let syncHtml = isMaster ? `
+      <div class="sync-box ${syncLock ? 'sync-locked' : 'sync-unlocked'}">
+        <div class="master-badge">★ MASTER</div>
+        <div class="sync-main">${syncLock ? '🔒' : '🔓'} ${syncLock ? 'Locked' : 'Unlocked'} @ ${refreshHz} Hz</div>
+        <div class="sync-detail">House Sync: ${sync.house_sync ? 'ON' : 'OFF'} (${houseHz} Hz) · Source: ${esc(sync.source || '—')}</div>
+      </div>` : `
+      <div class="sync-box ${syncLock ? 'sync-locked' : 'sync-unlocked'}">
+        <div class="sync-main">${syncLock ? '🔒' : '🔓'} ${syncLock ? 'Locked' : 'Unlocked'} @ ${refreshHz} Hz</div>
+      </div>`;
+
+  const outputOptions = outputs.map(o => `<option value="${o.id}">${esc(o.name)} (${o.id})</option>`).join('') || '<option value="0">Auto</option>';
+
+  let edidHtml = '';
+  if (outputs.length > 0) {
+    edidHtml = outputs.map(o => {
+      const label = o.edid_loaded
+        ? `${esc(o.name)}: ${esc(o.edid_name) || 'EDID'} ✅`
+        : `${esc(o.name)}: No EDID ❌`;
+      const cls = o.edid_loaded ? 'edid-ok' : 'edid-err';
+      return `<div class="edid-row"><span class="${cls}">${label}</span></div>`;
+    }).join('');
+  }
+  if (unused > 0) edidHtml += `<div class="unused-label">(+${unused} unused)</div>`;
+
+  return `<div class="card ${isMaster ? 'master' : ''}">
+    <div class="card-hdr">
+      <div class="card-hdr-left">
+        <span class="status-dot ${dotClass}"></span>
+        <span class="node-name">${esc(n.name)}</span>
+        <span class="node-ip">${esc(n.ip)}</span>
+      </div>
+      <span class="gpu-label">${esc(gpuShort)}</span>
+    </div>
+    ${syncHtml}
+    <div class="action-row">
+      <button class="btn blue" onclick="enableSync(${n.id})">Enable Sync</button>
+      <button class="btn red" onclick="disableSync(${n.id})">Disable Sync</button>
+    </div>
+    <div style="border-top:1px solid var(--border); margin:10px 0"></div>
+    ${edidHtml}
+    <div class="action-row" style="margin-top:6px">
+      <select id="out-${n.id}" style="font-size:12px;background:#0f172a;color:var(--muted);border:1px solid var(--border);border-radius:8px;padding:4px 6px">${outputOptions}</select>
+      <input type="file" id="file-${n.id}" accept=".bin" style="display:none" onchange="onEdidSelected(${n.id})">
+      <button class="btn blue" onclick="document.getElementById('file-${n.id}').click()">🔍 Search</button>
+      <span id="fname-${n.id}" style="font-size:11px;color:var(--muted);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+      <button class="btn ok" id="loadbtn-${n.id}" onclick="loadEdid(${n.id})" disabled style="opacity:0.4">📤 Load</button>
+      <button class="btn red" onclick="unloadEdid(${n.id})">🗑️ Unload</button>
+    </div>
+  </div>`;
+}
+
+connectWS();
+</script>
+</body>
+</html>
